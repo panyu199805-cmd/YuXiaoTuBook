@@ -1,0 +1,54 @@
+:root,
+[data-admin-theme='light'] {
+  --ecms-bg: #f4f7fe;
+  --ecms-sidebar-bg: #ffffff;
+  --ecms-header-bg: #ffffff;
+  --ecms-card-bg: #ffffff;
+  --ecms-text: #1d2129;
+  --ecms-text-secondary: #86909c;
+  --ecms-border: #e5e6eb;
+  --ecms-sidebar-text: #4e5969;
+  --ecms-sidebar-active-bg: rgba(93, 135, 255, 0.1);
+  --ecms-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  --ecms-primary: #5d87ff;
+  --ecms-radius: 8px;
+  --el-color-primary: #5d87ff;
+}
+
+.admin-shell {
+  background: var(--ecms-bg);
+  color: var(--ecms-text);
+}
+
+.admin-shell .el-card {
+  border-radius: var(--ecms-radius) !important;
+  border: 1px solid var(--ecms-border) !important;
+  box-shadow: var(--ecms-shadow) !important;
+  background: var(--ecms-card-bg) !important;
+}
+
+.admin-shell .page-card {
+  background: var(--ecms-card-bg);
+  border-radius: var(--ecms-radius);
+  border: 1px solid var(--ecms-border);
+  box-shadow: var(--ecms-shadow);
+  padding: 20px;
+}
+
+.admin-shell .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.admin-shell .page-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ecms-text);
+}
+
+.admin-shell .el-button--primary {
+  --el-button-bg-color: var(--ecms-primary);
+  --el-button-border-color: var(--ecms-primary);
+}

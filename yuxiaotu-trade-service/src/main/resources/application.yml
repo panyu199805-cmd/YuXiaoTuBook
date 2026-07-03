@@ -1,0 +1,31 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: yuxiaotu-trade-service
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: ${DATABASE_URL:jdbc:mysql://127.0.0.1:3306/yuxiaotu_book?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+trade:
+  jwt-secret: ${JWT_SECRET:yuxiaotu-dev-secret-key-32chars-min}
+  mock-pay-enabled: ${MOCK_PAY_ENABLED:true}
+  member-mock-pay-enabled: ${MEMBER_MOCK_PAY_ENABLED:true}
+  payment-provider: ${PAYMENT_PROVIDER:mock}
+  order-timeout-minutes: ${ORDER_TIMEOUT_MINUTES:30}
+
+logging:
+  level:
+    com.yuxiaotu.trade: INFO

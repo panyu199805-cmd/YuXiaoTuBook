@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+uploads/
+node_modules/
+**/node_modules/
+dist/
+target/
+**/target/
+*.tsbuildinfo
+.DS_Store

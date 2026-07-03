@@ -1,0 +1,462 @@
+from __future__ import annotations
+
+import os
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, UploadFile
+
+from app.core.config import settings
+from app.core.deps import get_admin_user
+from app.core.response import fail, success
+from datetime import date
+
+from app.models import Book, BookVideo, Category, DailyBook, MemberPackage, Order, SiteConfig, User
+from app.schemas.requests import (
+    BookCreateRequest,
+    BookUpdateRequest,
+    CategoryRequest,
+    DailyBookRequest,
+    DailyBookUpdateRequest,
+    MemberPackageRequest,
+    ShipOrderRequest,
+    AdminOrderUpdateRequest,
+    SiteConfigRequest,
+    AdminUserUpdateRequest,
+    VideoBindRequest,
+)
+from app.services.book_service import book_to_dict
+from app.services.daily_service import daily_to_dict
+from app.services.order_helpers import filter_admin_orders, order_to_dict
+from app.services.order_service import OrderService
+from app.services.site_config_helpers import (
+    MAX_BG_VIDEOS,
+    normalize_bg_videos,
+    site_config_to_dict,
+)
+from app.services.user_admin_service import build_user_region_tree, get_admin_user_detail
+
+upload_router = APIRouter(tags=["Admin-上传"])
+books_router = APIRouter(tags=["Admin-书籍"])
+videos_router = APIRouter(tags=["Admin-视频"])
+categories_router = APIRouter(tags=["Admin-分类"])
+orders_router = APIRouter(tags=["Admin-订单"])
+site_router = APIRouter(tags=["Admin-氛围配置"])
+daily_router = APIRouter(tags=["Admin-每日读书"])
+member_router = APIRouter(tags=["Admin-会员"])
+users_router = APIRouter(tags=["Admin-用户"])
+
+router = APIRouter()
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+VIDEO_EXTS = {".mp4", ".webm"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
+MAX_VIDEO_SIZE = 50 * 1024 * 1024
+
+
+@upload_router.post("/upload", summary="上传图片或视频")
+async def upload_file(
+    file: UploadFile = File(...),
+    user: User = Depends(get_admin_user),
+):
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext in IMAGE_EXTS:
+        media_type = "image"
+        max_size = MAX_IMAGE_SIZE
+    elif ext in VIDEO_EXTS:
+        media_type = "video"
+        max_size = MAX_VIDEO_SIZE
+    else:
+        return fail("仅支持 jpg/png/webp/mp4/webm", 400)
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = os.path.join(settings.UPLOAD_DIR, name)
+    content = await file.read()
+    if len(content) > max_size:
+        limit_mb = max_size // (1024 * 1024)
+        return fail(f"文件不能超过{limit_mb}MB", 400)
+    with open(path, "wb") as f:
+        f.write(content)
+    url = f"/uploads/{name}"
+    return success({"url": url, "media_type": media_type})
+
+
+@books_router.get("/books", summary="书籍列表")
+async def admin_list_books(user: User = Depends(get_admin_user)):
+    books = await Book.all().order_by("-id")
+    result = []
+    for b in books:
+        d = await book_to_dict(b)
+        d["status"] = b.status
+        d["stock"] = b.stock
+        result.append(d)
+    return success(result)
+
+
+@books_router.post("/books", summary="新增书籍")
+async def admin_create_book(body: BookCreateRequest, user: User = Depends(get_admin_user)):
+    book = await Book.create(**body.model_dump())
+    return success(await book_to_dict(book))
+
+
+@books_router.put("/books/{book_id}", summary="更新书籍")
+async def admin_update_book(
+    book_id: int, body: BookUpdateRequest, user: User = Depends(get_admin_user)
+):
+    book = await Book.get_or_none(id=book_id)
+    if not book:
+        return fail("书籍不存在", 404)
+    data = body.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(book, k, v)
+    await book.save()
+    return success(await book_to_dict(book))
+
+
+@books_router.delete("/books/{book_id}", summary="删除书籍")
+async def admin_delete_book(book_id: int, user: User = Depends(get_admin_user)):
+    await Book.filter(id=book_id).delete()
+    await BookVideo.filter(book_id=book_id).delete()
+    return success(None, "已删除")
+
+
+@videos_router.get("/videos", summary="视频列表")
+async def admin_list_videos(user: User = Depends(get_admin_user)):
+    videos = await BookVideo.all().order_by("-id")
+    return success(
+        [
+            {
+                "id": v.id,
+                "book_id": v.book_id,
+                "video_cover": v.video_cover,
+                "video_url": v.video_url,
+                "video_duration": v.video_duration,
+                "video_intro": v.video_intro,
+                "status": v.status,
+                "play_count": v.play_count,
+            }
+            for v in videos
+        ]
+    )
+
+
+@videos_router.post("/videos", summary="绑定/更新视频")
+async def admin_bind_video(body: VideoBindRequest, user: User = Depends(get_admin_user)):
+    existing = await BookVideo.get_or_none(book_id=body.book_id)
+    if existing:
+        for k, v in body.model_dump().items():
+            setattr(existing, k, v)
+        await existing.save()
+        return success({"id": existing.id})
+    video = await BookVideo.create(**body.model_dump())
+    return success({"id": video.id})
+
+
+@videos_router.delete("/videos/{video_id}", summary="删除视频")
+async def admin_delete_video(video_id: int, user: User = Depends(get_admin_user)):
+    if not await BookVideo.filter(id=video_id).exists():
+        return fail("视频不存在", 404)
+    await BookVideo.filter(id=video_id).delete()
+    return success(None, "已删除")
+
+
+@categories_router.get("/categories", summary="分类列表")
+async def admin_categories(user: User = Depends(get_admin_user)):
+    cats = await Category.all().order_by("sort_order")
+    return success([{"id": c.id, "name": c.name, "slug": c.slug, "sort_order": c.sort_order} for c in cats])
+
+
+@categories_router.post("/categories", summary="新增分类")
+async def admin_create_category(body: CategoryRequest, user: User = Depends(get_admin_user)):
+    cat = await Category.create(**body.model_dump())
+    return success({"id": cat.id})
+
+
+@categories_router.delete("/categories/{cat_id}", summary="删除分类")
+async def admin_delete_category(cat_id: int, user: User = Depends(get_admin_user)):
+    await Category.filter(id=cat_id).delete()
+    return success(None)
+
+
+@orders_router.get("/orders", summary="订单列表")
+async def admin_orders(
+    page: int = 1,
+    page_size: int = 10,
+    order_no: Optional[str] = None,
+    book_name: Optional[str] = None,
+    user_nickname: Optional[str] = None,
+    receiver_phone: Optional[str] = None,
+    ship_tracking_no: Optional[str] = None,
+    status: Optional[str] = None,
+    created_start: Optional[str] = None,
+    created_end: Optional[str] = None,
+    pay_start: Optional[str] = None,
+    pay_end: Optional[str] = None,
+    user: User = Depends(get_admin_user),
+):
+    allowed_sizes = {10, 20, 30, 40, 50}
+    page = max(1, page)
+    if page_size not in allowed_sizes:
+        page_size = 10
+
+    qs = await filter_admin_orders(
+        order_no=order_no,
+        book_name=book_name,
+        user_nickname=user_nickname,
+        receiver_phone=receiver_phone,
+        ship_tracking_no=ship_tracking_no,
+        status=status,
+        created_start=created_start,
+        created_end=created_end,
+        pay_start=pay_start,
+        pay_end=pay_end,
+    )
+    total = await qs.count()
+    if total == 0:
+        return success({"list": [], "total": 0, "page": page, "page_size": page_size})
+
+    orders = await qs.order_by("-created_at").offset((page - 1) * page_size).limit(page_size)
+    user_map = {
+        u.id: u for u in await User.filter(id__in=list({o.user_id for o in orders}))
+    }
+    items = [await order_to_dict(o, user=user_map.get(o.user_id)) for o in orders]
+    return success({"list": items, "total": total, "page": page, "page_size": page_size})
+
+
+@orders_router.put("/orders/{order_id}", summary="编辑订单")
+async def admin_update_order(
+    order_id: int,
+    body: AdminOrderUpdateRequest,
+    user: User = Depends(get_admin_user),
+):
+    try:
+        order = await OrderService.update_order(
+            order_id,
+            body.receiver_name,
+            body.receiver_phone,
+            body.receiver_address,
+            body.ship_company,
+            body.ship_tracking_no,
+        )
+    except ValueError as e:
+        return fail(str(e), 400)
+    return success(await order_to_dict(order), "保存成功")
+
+
+@orders_router.put("/orders/{order_id}/ship", summary="订单发货")
+async def admin_ship_order(
+    order_id: int, body: ShipOrderRequest, user: User = Depends(get_admin_user)
+):
+    try:
+        order = await OrderService.ship_order(
+            order_id, body.ship_company, body.ship_tracking_no
+        )
+    except ValueError as e:
+        return fail(str(e), 400)
+    return success(await order_to_dict(order), "发货成功")
+
+
+@orders_router.put("/orders/{order_id}/status", summary="更新订单状态")
+async def admin_update_order_status(
+    order_id: int,
+    status: str,
+    cancel_reason: Optional[str] = None,
+    user: User = Depends(get_admin_user),
+):
+    order = await Order.get_or_none(id=order_id)
+    if not order:
+        return fail("订单不存在", 404)
+    if status == "cancelled":
+        try:
+            order = await OrderService.cancel(
+                order_id,
+                None,
+                is_admin=True,
+                cancel_reason=cancel_reason,
+            )
+        except ValueError as e:
+            return fail(str(e), 400)
+    else:
+        order.status = status
+        if status == "completed" and not order.completed_at:
+            from datetime import datetime
+
+            order.completed_at = datetime.utcnow()
+        await order.save()
+    return success(await order_to_dict(order))
+
+
+@site_router.get("/site-config", summary="获取氛围配置")
+async def admin_get_site_config(user: User = Depends(get_admin_user)):
+    cfg = await SiteConfig.all().order_by("-id").first()
+    if not cfg:
+        return success(None)
+    return success(site_config_to_dict(cfg))
+
+
+@site_router.put("/site-config", summary="保存氛围配置")
+async def admin_save_site_config(
+    body: SiteConfigRequest, user: User = Depends(get_admin_user)
+):
+    payload = body.model_dump()
+    bg_videos = normalize_bg_videos(payload.get("bg_videos"))
+    if len(bg_videos) > MAX_BG_VIDEOS:
+        return fail(f"背景视频最多 {MAX_BG_VIDEOS} 个", 400)
+    payload["bg_videos"] = bg_videos or None
+    if bg_videos:
+        payload["bg_type"] = "video"
+        payload["bg_url"] = bg_videos[0]
+    elif payload.get("bg_type") == "video" and not payload.get("bg_url"):
+        payload["bg_type"] = "image"
+
+    cfg = await SiteConfig.all().order_by("-id").first()
+    if cfg:
+        for k, v in payload.items():
+            setattr(cfg, k, v)
+        await cfg.save()
+    else:
+        cfg = await SiteConfig.create(**payload)
+    return success({"id": cfg.id})
+
+
+@daily_router.get("/daily", summary="每日读书列表")
+async def admin_list_daily(user: User = Depends(get_admin_user)):
+    items = await DailyBook.all().order_by("-publish_date")
+    return success([await daily_to_dict(d) for d in items])
+
+
+@daily_router.post("/daily", summary="新增每日读书")
+async def admin_create_daily(body: DailyBookRequest, user: User = Depends(get_admin_user)):
+    book = await Book.get_or_none(id=body.book_id)
+    if not book:
+        return fail("书籍不存在", 404)
+    try:
+        pub = date.fromisoformat(body.publish_date)
+    except ValueError:
+        return fail("日期格式错误", 400)
+    if await DailyBook.filter(publish_date=pub).exists():
+        return fail("该日期已有内容", 400)
+    daily = await DailyBook.create(
+        book_id=body.book_id,
+        daily_sentence=body.daily_sentence,
+        daily_intro=body.daily_intro,
+        publish_date=pub,
+        is_top=body.is_top,
+        status=body.status,
+    )
+    return success(await daily_to_dict(daily))
+
+
+@daily_router.put("/daily/{daily_id}", summary="更新每日读书")
+async def admin_update_daily(
+    daily_id: int, body: DailyBookUpdateRequest, user: User = Depends(get_admin_user)
+):
+    daily = await DailyBook.get_or_none(id=daily_id)
+    if not daily:
+        return fail("内容不存在", 404)
+    data = body.model_dump(exclude_unset=True)
+    if "publish_date" in data and data["publish_date"]:
+        try:
+            data["publish_date"] = date.fromisoformat(data["publish_date"])
+        except ValueError:
+            return fail("日期格式错误", 400)
+    for k, v in data.items():
+        setattr(daily, k, v)
+    await daily.save()
+    return success(await daily_to_dict(daily))
+
+
+@daily_router.delete("/daily/{daily_id}", summary="删除每日读书")
+async def admin_delete_daily(daily_id: int, user: User = Depends(get_admin_user)):
+    await DailyBook.filter(id=daily_id).delete()
+    return success(None, "已删除")
+
+
+@member_router.get("/member/packages", summary="会员套餐列表")
+async def admin_list_packages(user: User = Depends(get_admin_user)):
+    packages = await MemberPackage.all().order_by("price")
+    return success(
+        [
+            {
+                "id": p.id,
+                "package_name": p.package_name,
+                "price": p.price,
+                "valid_day": p.valid_day,
+                "rights": p.rights,
+                "status": p.status,
+            }
+            for p in packages
+        ]
+    )
+
+
+@member_router.post("/member/packages", summary="新增会员套餐")
+async def admin_create_package(body: MemberPackageRequest, user: User = Depends(get_admin_user)):
+    pkg = await MemberPackage.create(**body.model_dump())
+    return success({"id": pkg.id})
+
+
+@member_router.put("/member/packages/{package_id}", summary="更新会员套餐")
+async def admin_update_package(
+    package_id: int, body: MemberPackageRequest, user: User = Depends(get_admin_user)
+):
+    pkg = await MemberPackage.get_or_none(id=package_id)
+    if not pkg:
+        return fail("套餐不存在", 404)
+    for k, v in body.model_dump().items():
+        setattr(pkg, k, v)
+    await pkg.save()
+    return success({"id": pkg.id})
+
+
+@member_router.delete("/member/packages/{package_id}", summary="删除会员套餐")
+async def admin_delete_package(package_id: int, user: User = Depends(get_admin_user)):
+    await MemberPackage.filter(id=package_id).delete()
+    return success(None, "已删除")
+
+
+@users_router.get("/users/tree", summary="用户地区树")
+async def admin_users_tree(user: User = Depends(get_admin_user)):
+    tree = await build_user_region_tree()
+    total = await User.filter(role="user").count()
+    return success({"tree": tree, "total": total})
+
+
+@users_router.get("/users/{user_id}", summary="用户详情")
+async def admin_user_detail(user_id: int, user: User = Depends(get_admin_user)):
+    try:
+        data = await get_admin_user_detail(user_id)
+    except ValueError as e:
+        return fail(str(e), 404)
+    return success(data)
+
+
+@users_router.put("/users/{user_id}", summary="更新用户信息")
+async def admin_update_user(
+    user_id: int, body: AdminUserUpdateRequest, admin: User = Depends(get_admin_user)
+):
+    target = await User.get_or_none(id=user_id)
+    if not target:
+        return fail("用户不存在", 404)
+    data = body.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if k in ("province", "city") and v is not None:
+            v = v.strip() or None
+        setattr(target, k, v)
+    await target.save()
+    try:
+        detail = await get_admin_user_detail(user_id)
+    except ValueError as e:
+        return fail(str(e), 404)
+    return success(detail, "更新成功")
+
+
+router.include_router(upload_router)
+router.include_router(books_router)
+router.include_router(videos_router)
+router.include_router(categories_router)
+router.include_router(orders_router)
+router.include_router(site_router)
+router.include_router(daily_router)
+router.include_router(member_router)
+router.include_router(users_router)

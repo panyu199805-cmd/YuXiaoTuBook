@@ -1,0 +1,89 @@
+name: YuXiaotuBookCustomer
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: yuxiaotu-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: yuxiaotu_book
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    container_name: yuxiaotu-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: YuXiaotuBook
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: mysql://root:123456@mysql:3306/yuxiaotu_book
+      JWT_SECRET: ${JWT_SECRET:-yuxiaotu-dev-secret-key-32chars-min}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-168}
+      GUEST_VIDEO_PREVIEW_SECONDS: ${GUEST_VIDEO_PREVIEW_SECONDS:-180}
+      DEBUG: ${DEBUG:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5188,http://127.0.0.1:5188}
+    volumes:
+      - ../backend/static:/app/static:ro
+      - ../backend/uploads:/app/uploads
+      - ../backend/app/main.py:/app/app/main.py:ro
+      - ../backend/app/api/v1/admin.py:/app/app/api/v1/admin.py:ro
+      - ../backend/app/api/v1/favorites.py:/app/app/api/v1/favorites.py:ro
+      - ../backend/app/api/v1/home.py:/app/app/api/v1/home.py:ro
+      - ../backend/app/models/site.py:/app/app/models/site.py:ro
+      - ../backend/app/models/order.py:/app/app/models/order.py:ro
+      - ../backend/app/core/static_files.py:/app/app/core/static_files.py:ro
+      - ../backend/app/schemas/requests.py:/app/app/schemas/requests.py:ro
+      - ../backend/app/services/site_config_helpers.py:/app/app/services/site_config_helpers.py:ro
+      - ../backend/app/services/order_helpers.py:/app/app/services/order_helpers.py:ro
+      - ../backend/app/services/order_service.py:/app/app/services/order_service.py:ro
+      - ../backend/app/services/collect_service.py:/app/app/services/collect_service.py:ro
+      - ../backend/app/services/member_service.py:/app/app/services/member_service.py:ro
+      - ../backend/app/services/user_admin_service.py:/app/app/services/user_admin_service.py:ro
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  trade:
+    build:
+      context: ../../yuxiaotu-trade-service
+      dockerfile: Dockerfile
+    container_name: yuxiaotu-trade
+    ports:
+      - "8081:8081"
+    environment:
+      DATABASE_URL: jdbc:mysql://mysql:3306/yuxiaotu_book?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
+      DB_USERNAME: root
+      DB_PASSWORD: "123456"
+      JWT_SECRET: ${JWT_SECRET:-yuxiaotu-dev-secret-key-32chars-min}
+      MOCK_PAY_ENABLED: ${MOCK_PAY_ENABLED:-true}
+      MEMBER_MOCK_PAY_ENABLED: ${MEMBER_MOCK_PAY_ENABLED:-true}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      ORDER_TIMEOUT_MINUTES: ${ORDER_TIMEOUT_MINUTES:-30}
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+    external: true
+    name: deploy_mysql_data
+  minio_data:

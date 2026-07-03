@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="560" viewBox="0 0 400 560">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7f1d1d"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="560" fill="url(#bg)"/>
+  <rect x="28" y="36" width="344" height="488" rx="10" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)"/>
+  <circle cx="320" cy="92" r="42" fill="#fef3c7" opacity="0.22"/>
+  <rect x="52" y="72" width="72" height="8" rx="4" fill="#fef3c7" opacity="0.85"/>
+  <rect x="52" y="92" width="48" height="6" rx="3" fill="#fef3c7" opacity="0.55"/>
+  <text x="200" y="250" fill="#ffffff" font-size="34" font-family="Microsoft YaHei, PingFang SC, sans-serif" font-weight="700" text-anchor="middle"><tspan x="200" dy="0">活着</tspan></text>
+  <line x1="80" y1="360" x2="320" y2="360" stroke="#fef3c7" stroke-width="2" opacity="0.45"/>
+  <text x="200" y="410" fill="#fef3c7" font-size="20" font-family="Microsoft YaHei, PingFang SC, sans-serif" text-anchor="middle">余华</text>
+  <text x="200" y="470" fill="rgba(255,255,255,0.72)" font-size="14" font-family="Microsoft YaHei, PingFang SC, sans-serif" text-anchor="middle">宇小兔 · 每日读书</text>
+</svg>

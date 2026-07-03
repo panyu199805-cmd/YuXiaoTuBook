@@ -1,0 +1,16 @@
+# Web
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.6
+
+# ORM & DB
+tortoise-orm==0.20.1
+aerich==0.7.2
+asyncmy==0.2.9
+
+# Auth & utils
+pyjwt==2.8.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-dotenv==1.0.0
+httpx==0.27.2
