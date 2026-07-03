@@ -67,6 +67,16 @@ yuxiaotu-book/
 - [x] 下单 + 模拟支付（`MOCK_PAY_ENABLED=true`）
 - [x] 管理后台 CRUD
 
+## 生产部署
+
+云服务器打包与上线见 **[YuXiaotuBook/deploy/DEPLOY.md](YuXiaotuBook/deploy/DEPLOY.md)**。
+
+```bash
+cd YuXiaotuBook/deploy
+cp .env.prod.example .env   # 编辑域名与密码
+./deploy.sh
+```
+
 ## 注意事项
 
 - 生产环境请设置 `MOCK_PAY_ENABLED=false`

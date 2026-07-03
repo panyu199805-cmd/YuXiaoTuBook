@@ -1,0 +1,79 @@
+# 生产环境：业务 Docker + 宿主机 MySQL（Navicat 管理 / mysqldump 备份）
+# 用法见 deploy/DEPLOY.md
+
+name: YuXiaoTuBookProd
+
+x-db-host: &db_host
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  api:
+    <<: *db_host
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: yuxiaotu-api-prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?请在 .env 中设置 DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-168}
+      GUEST_VIDEO_PREVIEW_SECONDS: ${GUEST_VIDEO_PREVIEW_SECONDS:-180}
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:?请在 .env 中设置 CORS_ORIGINS}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - api_uploads:/app/uploads
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  trade:
+    <<: *db_host
+    build:
+      context: ../../yuxiaotu-trade-service
+      dockerfile: Dockerfile
+    container_name: yuxiaotu-trade-prod
+    environment:
+      DATABASE_URL: ${JDBC_DATABASE_URL:?请在 .env 中设置 JDBC_DATABASE_URL}
+      DB_USERNAME: ${MYSQL_USER:-root}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      MOCK_PAY_ENABLED: ${MOCK_PAY_ENABLED:-false}
+      MEMBER_MOCK_PAY_ENABLED: ${MEMBER_MOCK_PAY_ENABLED:-false}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      ORDER_TIMEOUT_MINUTES: ${ORDER_TIMEOUT_MINUTES:-30}
+      JAVA_OPTS: ${JAVA_OPTS:--Xms256m -Xmx512m}
+    expose:
+      - "8081"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: yuxiaotu-nginx-prod
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ../frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx/yuxiaotu.docker.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - trade
+    restart: unless-stopped
+
+  # 首次初始化：docker compose -f docker-compose.prod.yml --env-file .env --profile init run --rm seed
+  seed:
+    <<: *db_host
+    profiles: ["init"]
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - ../scripts:/scripts:ro
+    working_dir: /scripts
+    command: ["python", "seed.py"]
+
+volumes:
+  api_uploads:
