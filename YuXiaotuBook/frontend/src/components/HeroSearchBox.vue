@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useBookSearchSuggest } from '@/composables/useBookSearchSuggest'
+import BookSearchSuggestList from '@/components/BookSearchSuggestList.vue'
 
 defineProps<{
   tags?: { id?: number; name: string; slug?: string }[]
@@ -9,8 +11,13 @@ defineProps<{
 const router = useRouter()
 const tab = ref<'books' | 'daily'>('books')
 const keyword = ref('')
+const booksSuggestEnabled = computed(() => tab.value === 'books')
+
+const { suggestions, showSuggestions, activeIndex, hideSuggestions, moveActive } =
+  useBookSearchSuggest(keyword, booksSuggestEnabled)
 
 function search() {
+  hideSuggestions()
   const q = keyword.value.trim()
   if (tab.value === 'daily') {
     router.push(q ? { path: '/daily', query: { q } } : '/daily')
@@ -19,10 +26,46 @@ function search() {
   router.push(q ? { path: '/books', query: { keyword: q } } : '/books')
 }
 
-function searchTag(name: string) {
-  keyword.value = name
+function searchTag(tag: { id?: number; name: string }) {
+  hideSuggestions()
   tab.value = 'books'
+  if (tag.id) {
+    router.push({ path: '/books', query: { category_id: String(tag.id) } })
+    return
+  }
+  keyword.value = tag.name
   search()
+}
+
+function pickSuggestion(id: number) {
+  hideSuggestions()
+  router.push(`/books/${id}`)
+}
+
+function onInputFocus() {
+  if (keyword.value.trim() && suggestions.value.length) {
+    showSuggestions.value = true
+  }
+}
+
+function onInputBlur() {
+  setTimeout(hideSuggestions, 150)
+}
+
+function onInputKeydown(e: KeyboardEvent) {
+  if (!showSuggestions.value || !suggestions.value.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    moveActive(1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    moveActive(-1)
+  } else if (e.key === 'Enter' && activeIndex.value >= 0) {
+    e.preventDefault()
+    pickSuggestion(suggestions.value[activeIndex.value].id)
+  } else if (e.key === 'Escape') {
+    hideSuggestions()
+  }
 }
 </script>
 
@@ -42,7 +85,7 @@ function searchTag(name: string) {
           type="button"
           class="tab"
           :class="{ active: tab === 'daily' }"
-          @click="tab = 'daily'"
+          @click="tab = 'daily'; hideSuggestions()"
         >
           每日读书
         </button>
@@ -53,7 +96,11 @@ function searchTag(name: string) {
           v-model="keyword"
           type="search"
           :placeholder="tab === 'books' ? '搜索书名、作者，发现解读视频' : '搜索每日读书关键词'"
+          autocomplete="off"
           @keyup.enter="search"
+          @keydown="onInputKeydown"
+          @focus="onInputFocus"
+          @blur="onInputBlur"
         />
         <span class="search-divider" aria-hidden="true" />
         <button type="button" class="search-btn" aria-label="搜索" @click="search">
@@ -65,13 +112,22 @@ function searchTag(name: string) {
       </div>
     </div>
 
+    <BookSearchSuggestList
+      v-if="tab === 'books' && showSuggestions && suggestions.length"
+      class="suggest-dropdown"
+      :items="suggestions"
+      :active-index="activeIndex"
+      variant="hero"
+      @pick="pickSuggestion"
+    />
+
     <div v-if="tags?.length" class="quick-tags">
       <button
         v-for="t in tags.slice(0, 8)"
         :key="t.id ?? t.name"
         type="button"
         class="tag"
-        @click="searchTag(t.name)"
+        @click="searchTag(t)"
       >
         {{ t.name }}
       </button>
@@ -82,6 +138,7 @@ function searchTag(name: string) {
 <style scoped>
 .search-wrap {
   width: min(760px, 100%);
+  position: relative;
 }
 
 .search-box {
@@ -94,6 +151,14 @@ function searchTag(name: string) {
     0 8px 32px rgba(0, 0, 0, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
   overflow: hidden;
+}
+
+.suggest-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
 }
 
 .search-tabs {

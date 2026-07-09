@@ -29,6 +29,14 @@ async def book_to_dict(book: Book, with_video_meta: bool = True) -> Dict[str, An
             "cover": video.video_cover,
             "intro": video.video_intro,
         }
+        if video.explain_content:
+            raw = video.explain_content.strip()
+            if "---\n" in raw:
+                title, body = raw.split("---\n", 1)
+                data["ebook_title"] = title.strip()
+                data["ebook_content"] = body.strip()
+            else:
+                data["ebook_content"] = raw
     return data
 
 
@@ -40,6 +48,7 @@ async def book_list_item(book: Book) -> Dict[str, Any]:
         "title": book.title,
         "author": book.author,
         "cover": book.cover,
+        "highlight": book.highlight,
         "category": {"id": category.id, "name": category.name} if category else None,
         "price": float(book.price),
         "has_video": video is not None,

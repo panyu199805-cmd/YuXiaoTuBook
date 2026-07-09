@@ -20,9 +20,9 @@ export const useAdminTabsStore = defineStore('adminTabs', () => {
 
   function removeTab(path: string) {
     const idx = tabs.value.findIndex((t) => t.path === path)
-    if (idx === -1) return tabs.value[0]?.path || '/admin/books'
+    if (idx === -1) return tabs.value[0]?.path || '/admin/analytics/overview'
     tabs.value.splice(idx, 1)
-    return tabs.value[idx]?.path || tabs.value[idx - 1]?.path || '/admin/books'
+    return tabs.value[idx]?.path || tabs.value[idx - 1]?.path || '/admin/analytics/overview'
   }
 
   function clearTabs() {

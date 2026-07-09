@@ -1,19 +1,43 @@
 #!/usr/bin/env bash
 # 宇小兔每日读书 — 生产部署脚本（Linux 云服务器）
+# 默认布局：/usr/local/projects/yuxiaotu/{app,data,env,logs}
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-ENV_FILE="${ENV_FILE:-.env}"
 COMPOSE_FILE="docker-compose.prod.yml"
+
+if [[ "$SCRIPT_DIR" == */app/YuXiaotuBook/deploy ]]; then
+  PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+else
+  PROJECT_ROOT="${PROJECT_ROOT:-/usr/local/projects/yuxiaotu}"
+fi
+
+export PROJECT_ROOT
 
 log() { echo "[deploy] $*"; }
 
+chmod +x scripts/setup-server-dirs.sh 2>/dev/null || true
+PROJECT_ROOT="$PROJECT_ROOT" ./scripts/setup-server-dirs.sh
+
+ENV_FILE="${ENV_FILE:-}"
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "$PROJECT_ROOT/env/prod.env" ]]; then
+    ENV_FILE="$PROJECT_ROOT/env/prod.env"
+  elif [[ -f "$PROJECT_ROOT/env/.env" ]]; then
+    ENV_FILE="$PROJECT_ROOT/env/.env"
+  else
+    ENV_FILE="$PROJECT_ROOT/env/prod.env"
+  fi
+fi
+if [[ ! -f "$ENV_FILE" ]] && [[ -f "$SCRIPT_DIR/.env" ]]; then
+  ENV_FILE="$SCRIPT_DIR/.env"
+fi
+
 if [[ ! -f "$ENV_FILE" ]]; then
-  log "未找到 $ENV_FILE，正在从 .env.prod.example 复制..."
-  cp .env.prod.example "$ENV_FILE"
-  log "请编辑 $ENV_FILE 后重新运行本脚本"
+  log "未找到 $ENV_FILE"
+  log "请运行 ./scripts/setup-server-dirs.sh 后编辑 env/prod.env"
   exit 1
 fi
 
@@ -35,8 +59,16 @@ if [[ -z "${DATABASE_URL:-}" ]] || [[ -z "${JDBC_DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
+UPLOAD_DATA_DIR="${UPLOAD_DATA_DIR:-$PROJECT_ROOT/data/uploads}"
+mkdir -p "$UPLOAD_DATA_DIR"
+
 if ! command -v docker >/dev/null 2>&1; then
-  log "未安装 Docker，请先安装：https://docs.docker.com/engine/install/"
+  log "未安装 Docker，请运行：sudo ./ubuntu2404/01-install-docker.sh"
+  exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  log "未找到 docker compose 插件，请安装 docker-compose-plugin"
   exit 1
 fi
 
@@ -52,7 +84,12 @@ if [[ -f package-lock.json ]]; then
 else
   npm install
 fi
-npm run build
+if npm run build 2>/dev/null; then
+  log "前端构建成功"
+else
+  log "npm run build 失败，改用 npx vite build"
+  npx vite build
+fi
 cd "$SCRIPT_DIR"
 
 if [[ ! -d ../frontend/dist ]]; then
@@ -74,6 +111,8 @@ done
 
 PORT="${HTTP_PORT:-80}"
 log "部署完成。"
+log "  项目根：$PROJECT_ROOT"
+log "  上传目录：$UPLOAD_DATA_DIR"
 log "  前台：http://${DOMAIN:-localhost}:${PORT}/"
 log "  管理后台：http://${DOMAIN:-localhost}:${PORT}/admin/login"
 log "  默认管理员（若已 seed）：admin / admin123456 — 上线后请立即修改"
@@ -82,4 +121,4 @@ log "首次部署初始化数据（宿主机 MySQL 已就绪后）："
 log "  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE --profile init run --rm seed"
 log ""
 log "MySQL 自动备份："
-log "  chmod +x scripts/backup-mysql.sh && ./scripts/backup-mysql.sh"
+log "  ./scripts/backup-mysql.sh"

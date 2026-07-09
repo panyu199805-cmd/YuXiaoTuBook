@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useHead } from '@unhead/vue'
 import BookCard from '@/components/BookCard.vue'
 import HeroSearchBox from '@/components/HeroSearchBox.vue'
+import HeroVideoLayer from '@/components/HeroVideoLayer.vue'
 import { request } from '@/api/client'
 import { inlineCoverFallback, placeholderCover, resolveMediaUrl } from '@/utils/media'
 import { useSiteStore } from '@/stores/site'
@@ -20,7 +21,7 @@ const hotBooks = ref<any[]>([])
 const categories = ref<any[]>([])
 const videoFailed = ref(false)
 const featuredCover = ref('')
-const videoLayerRefs = ref<(HTMLVideoElement | null)[]>([null, null])
+const videoLayerRefs = ref<(InstanceType<typeof HeroVideoLayer> | null)[]>([null, null])
 const layerSrc = ref<[string, string]>(['', ''])
 const activeLayer = ref(0)
 const currentVideoIndex = ref(0)
@@ -28,15 +29,19 @@ const isTransitioning = ref(false)
 
 const CROSSFADE_MS = 1200
 let crossfadeTimer: ReturnType<typeof setTimeout> | null = null
-let advanceTimer: ReturnType<typeof setTimeout> | null = null
-let endedHandled = false
+let advanceToken = 0
+
+function bumpAdvanceToken() {
+  advanceToken += 1
+  return advanceToken
+}
 
 function setVideoLayerRef(index: number, el: unknown) {
-  videoLayerRefs.value[index] = el as HTMLVideoElement | null
+  videoLayerRefs.value[index] = el as InstanceType<typeof HeroVideoLayer> | null
 }
 
 function getVideoLayer(index: number) {
-  return videoLayerRefs.value[index]
+  return videoLayerRefs.value[index]?.el ?? null
 }
 
 function getActiveVideoEl() {
@@ -115,63 +120,21 @@ function setLayerSrc(layer: 0 | 1, url: string) {
   layerSrc.value = next
 }
 
-function clearAdvanceTimer() {
-  if (advanceTimer) {
-    clearTimeout(advanceTimer)
-    advanceTimer = null
-  }
-}
-
-function pauseInactiveLayers() {
-  videoLayerRefs.value.forEach((el, index) => {
-    if (el && index !== activeLayer.value) {
-      el.pause()
-    }
-  })
-}
-
-function scheduleAutoAdvance(layer: number) {
-  clearAdvanceTimer()
-  const list = bgVideos.value
-  if (list.length <= 1) return
-
-  const el = getVideoLayer(layer)
-  if (!el) return
-
-  const plan = () => {
-    if (!Number.isFinite(el.duration) || el.duration <= 0) return
-    const remainMs = Math.max(500, el.duration * 1000 - el.currentTime * 1000 - 200)
-    advanceTimer = setTimeout(() => {
-      if (activeLayer.value !== layer || isTransitioning.value) return
-      advanceToNextVideo()
-    }, remainMs)
-  }
-
-  if (el.readyState >= HTMLMediaElement.HAVE_METADATA) plan()
-  else el.addEventListener('loadedmetadata', plan, { once: true })
-}
-
 function advanceToNextVideo() {
-  if (endedHandled) return
-  endedHandled = true
-
   const list = bgVideos.value
   if (list.length <= 1) {
     const el = getActiveVideoEl()
     if (el) {
       el.currentTime = 0
       void el.play().catch(() => {})
-      scheduleAutoAdvance(activeLayer.value)
     }
-    endedHandled = false
     return
   }
 
   const nextIndex = (currentVideoIndex.value + 1) % list.length
-  void goToVideo(nextIndex).finally(() => {
-    endedHandled = false
-  })
+  void goToVideo(nextIndex)
 }
+
 function preloadAdjacentVideo() {
   const list = bgVideos.value
   if (list.length <= 1) return
@@ -182,9 +145,17 @@ function preloadAdjacentVideo() {
     setLayerSrc(backLayer, nextUrl)
   }
   const backEl = getVideoLayer(backLayer)
-  if (backEl) {
-    backEl.pause()
-    backEl.currentTime = 0
+  if (!backEl) return
+  backEl.pause()
+  backEl.currentTime = 0
+  if (backEl.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+    void backEl
+      .play()
+      .then(() => {
+        backEl.pause()
+        backEl.currentTime = 0
+      })
+      .catch(() => {})
   }
 }
 
@@ -198,7 +169,6 @@ function onHeroVideoLoaded(layer: number) {
   if (layer !== activeLayer.value) return
   resumeHeroVideo()
   preloadAdjacentVideo()
-  scheduleAutoAdvance(layer)
 }
 
 function resetVideoLayers() {
@@ -206,8 +176,7 @@ function resetVideoLayers() {
     clearTimeout(crossfadeTimer)
     crossfadeTimer = null
   }
-  clearAdvanceTimer()
-  endedHandled = false
+  bumpAdvanceToken()
   isTransitioning.value = false
   currentVideoIndex.value = 0
   activeLayer.value = 0
@@ -226,14 +195,14 @@ async function goToVideo(nextIndex: number) {
     if (!el) return
     el.currentTime = 0
     void el.play().catch(() => {})
-    scheduleAutoAdvance(activeLayer.value)
     return
   }
 
   if (isTransitioning.value) return
+  if (normalized === currentVideoIndex.value) return
 
   isTransitioning.value = true
-  clearAdvanceTimer()
+  const token = bumpAdvanceToken()
   const prevLayer = activeLayer.value
   const backLayer = (1 - prevLayer) as 0 | 1
   setLayerSrc(backLayer, list[normalized])
@@ -245,19 +214,29 @@ async function goToVideo(nextIndex: number) {
     return
   }
 
-  if (backEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+  if (backEl.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
     await waitCanPlay(backEl)
   }
-  backEl.pause()
+  if (token !== advanceToken) {
+    isTransitioning.value = false
+    return
+  }
+
   backEl.currentTime = 0
-  await backEl.play().catch(() => {})
+  try {
+    await backEl.play()
+  } catch {
+    /* autoplay may fail briefly; still switch layer */
+  }
+  if (token !== advanceToken) {
+    isTransitioning.value = false
+    return
+  }
 
   activeLayer.value = backLayer
   currentVideoIndex.value = normalized
-  isTransitioning.value = false
-  pauseInactiveLayers()
   preloadAdjacentVideo()
-  scheduleAutoAdvance(backLayer)
+  isTransitioning.value = false
 
   if (crossfadeTimer) clearTimeout(crossfadeTimer)
   crossfadeTimer = setTimeout(() => {
@@ -274,19 +253,18 @@ function switchVideo(delta: number) {
   const list = bgVideos.value
   if (list.length <= 1) return
   revealNavArrows()
+  bumpAdvanceToken()
+  if (crossfadeTimer) {
+    clearTimeout(crossfadeTimer)
+    crossfadeTimer = null
+  }
+  isTransitioning.value = false
   void goToVideo(currentVideoIndex.value + delta)
 }
 
 function onHeroVideoEnded(layer: number) {
-  if (layer !== activeLayer.value) return
-  advanceToNextVideo()
-}
-
-function onHeroVideoTimeUpdate(layer: number) {
   if (layer !== activeLayer.value || bgVideos.value.length <= 1) return
-  const el = getVideoLayer(layer)
-  if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return
-  if (el.currentTime < el.duration - 0.3) return
+  if (isTransitioning.value) return
   advanceToNextVideo()
 }
 
@@ -303,10 +281,29 @@ watch(
   { immediate: true },
 )
 
+function pauseAllHeroVideos() {
+  videoLayerRefs.value.forEach((layer) => {
+    layer?.el?.pause()
+  })
+}
+
+function clearHeroTimers() {
+  if (crossfadeTimer) {
+    clearTimeout(crossfadeTimer)
+    crossfadeTimer = null
+  }
+  bumpAdvanceToken()
+  clearNavHideTimer()
+}
+
 onActivated(() => {
   void siteStore.fetchConfig(true)
   resumeHeroVideo()
-  scheduleAutoAdvance(activeLayer.value)
+})
+
+onDeactivated(() => {
+  pauseAllHeroVideos()
+  clearHeroTimers()
 })
 
 async function loadHomeData() {
@@ -327,7 +324,8 @@ async function loadHomeData() {
 onMounted(loadHomeData)
 
 onUnmounted(() => {
-  clearNavHideTimer()
+  pauseAllHeroVideos()
+  clearHeroTimers()
 })
 
 const trustItems = [
@@ -341,21 +339,15 @@ const trustItems = [
 <template>
   <section class="hero">
     <template v-if="useVideoBg">
-      <video
+      <HeroVideoLayer
         v-for="layer in 2"
         :key="layer - 1"
         :ref="(el) => setVideoLayerRef(layer - 1, el)"
-        class="hero-media"
-        :class="{ 'hero-media--active': activeLayer === layer - 1 }"
         :src="layerSrc[layer - 1] || undefined"
+        :active="activeLayer === layer - 1"
         :loop="bgVideos.length <= 1"
-        muted
-        playsinline
-        preload="auto"
         @loadeddata="onHeroVideoLoaded(layer - 1)"
-        @canplay="onHeroVideoLoaded(layer - 1)"
         @ended="onHeroVideoEnded(layer - 1)"
-        @timeupdate="onHeroVideoTimeUpdate(layer - 1)"
         @error="onVideoError"
       />
     </template>
@@ -508,6 +500,8 @@ const trustItems = [
 .hero-shade {
   position: absolute;
   inset: 0;
+  z-index: 2;
+  pointer-events: none;
   background: linear-gradient(
     180deg,
     rgba(0, 0, 0, 0.08) 0%,

@@ -69,12 +69,28 @@ yuxiaotu-book/
 
 ## 生产部署
 
-云服务器打包与上线见 **[YuXiaotuBook/deploy/DEPLOY.md](YuXiaotuBook/deploy/DEPLOY.md)**。
+**Ubuntu 24.04.4 LTS + Docker** 详见：
+
+- [YuXiaotuBook/deploy/ubuntu2404/README.md](YuXiaotuBook/deploy/ubuntu2404/README.md)
+- [YuXiaotuBook/deploy/DEPLOY.md](YuXiaotuBook/deploy/DEPLOY.md)
+
+**本机打部署包（Windows）：**
+
+```powershell
+cd YuXiaoTuBook\YuXiaotuBook\deploy
+.\pack-release.ps1
+# 输出 release\yuxiaotu-book-ubuntu2404-YYYYMMDD.tar.gz
+```
+
+**服务器解压部署：**
 
 ```bash
-cd YuXiaotuBook/deploy
-cp .env.prod.example .env   # 编辑域名与密码
-./deploy.sh
+sudo mkdir -p /usr/local/projects/yuxiaotu/{app,data/uploads,env,logs}
+sudo mkdir -p /var/backups/yuxiaotu/mysql
+sudo tar -xzf yuxiaotu-book-ubuntu2404-*.tar.gz -C /usr/local/projects/yuxiaotu/app
+cd /usr/local/projects/yuxiaotu/app/YuXiaotuBook/deploy/ubuntu2404
+sudo MYSQL_PASSWORD='你的密码' ./install-all.sh
+cd .. && ./scripts/setup-server-dirs.sh && nano /usr/local/projects/yuxiaotu/env/.env && ./deploy.sh
 ```
 
 ## 注意事项

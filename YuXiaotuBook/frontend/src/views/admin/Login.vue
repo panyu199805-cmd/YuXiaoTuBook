@@ -19,7 +19,12 @@ const rules: FormRules = {
 }
 
 async function submit() {
-  await formRef.value?.validate()
+  try {
+    await formRef.value?.validate()
+  } catch {
+    return
+  }
+
   loading.value = true
   try {
     const res = await request<any>({
@@ -27,12 +32,18 @@ async function submit() {
       method: 'POST',
       data: form,
     })
-    if (res.code === 200 && res.data.user.role === 'admin') {
+    if (res.code === 200 && res.data?.user?.role === 'admin') {
       store.setAuth(res.data.token, res.data.user)
-      router.push('/admin/books')
+      await router.push('/admin/analytics/overview')
       return
     }
-    ElMessage.error(res.code === 200 ? '非管理员账号' : res.msg)
+    ElMessage.error(res.code === 200 ? '非管理员账号' : res.msg || '登录失败')
+  } catch (err: unknown) {
+    const msg =
+      (err as { response?: { data?: { msg?: string } }; message?: string })?.response?.data?.msg ||
+      (err as Error)?.message ||
+      '无法连接服务器，请确认后端 API 已启动（端口 8000）'
+    ElMessage.error(msg)
   } finally {
     loading.value = false
   }

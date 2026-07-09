@@ -9,9 +9,22 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from app.core.config import settings
 from app.core.deps import get_admin_user
 from app.core.response import fail, success
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
-from app.models import Book, BookVideo, Category, DailyBook, MemberPackage, Order, SiteConfig, User
+from app.models import (
+    Book,
+    BookVideo,
+    Category,
+    DailyBook,
+    MemberOrder,
+    MemberPackage,
+    Order,
+    OrderItem,
+    SiteConfig,
+    User,
+    UserBookCollect,
+    UserMember,
+)
 from app.schemas.requests import (
     BookCreateRequest,
     BookUpdateRequest,
@@ -27,12 +40,24 @@ from app.schemas.requests import (
 )
 from app.services.book_service import book_to_dict
 from app.services.daily_service import daily_to_dict
-from app.services.order_helpers import filter_admin_orders, order_to_dict
+from app.services.order_helpers import (
+    STATUS_LABELS,
+    filter_admin_orders,
+    order_to_dict,
+    summarize_book_names,
+)
 from app.services.order_service import OrderService
 from app.services.site_config_helpers import (
     MAX_BG_VIDEOS,
     normalize_bg_videos,
     site_config_to_dict,
+)
+from app.services.analytics_service import (
+    build_order_stats,
+    build_overview_stats,
+    build_reading_stats,
+    build_region_stats,
+    build_system_stats,
 )
 from app.services.user_admin_service import build_user_region_tree, get_admin_user_detail
 
@@ -45,8 +70,11 @@ site_router = APIRouter(tags=["Admin-氛围配置"])
 daily_router = APIRouter(tags=["Admin-每日读书"])
 member_router = APIRouter(tags=["Admin-会员"])
 users_router = APIRouter(tags=["Admin-用户"])
+stats_router = APIRouter(tags=["Admin-数据统计"])
 
 router = APIRouter()
+
+REVENUE_STATUSES = ("paid", "shipped", "completed")
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTS = {".mp4", ".webm"}
@@ -451,6 +479,35 @@ async def admin_update_user(
     return success(detail, "更新成功")
 
 
+@stats_router.get("/stats/overview", summary="全站总览仪表盘")
+async def admin_stats_overview(user: User = Depends(get_admin_user)):
+    return success(await build_overview_stats())
+
+
+@stats_router.get("/stats/reading", summary="用户阅读行为分析")
+async def admin_stats_reading(user: User = Depends(get_admin_user)):
+    return success(await build_reading_stats())
+
+
+@stats_router.get("/stats/orders", summary="交易订单数据统计")
+async def admin_stats_orders(
+    days: int = 30,
+    user: User = Depends(get_admin_user),
+):
+    safe_days = 30 if days not in (7, 30, 90) else days
+    return success(await build_order_stats(days=safe_days))
+
+
+@stats_router.get("/stats/region", summary="用户地域分布分析")
+async def admin_stats_region(user: User = Depends(get_admin_user)):
+    return success(await build_region_stats())
+
+
+@stats_router.get("/stats/system", summary="系统性能监控面板")
+async def admin_stats_system(user: User = Depends(get_admin_user)):
+    return success(await build_system_stats())
+
+
 router.include_router(upload_router)
 router.include_router(books_router)
 router.include_router(videos_router)
@@ -460,3 +517,4 @@ router.include_router(site_router)
 router.include_router(daily_router)
 router.include_router(member_router)
 router.include_router(users_router)
+router.include_router(stats_router)

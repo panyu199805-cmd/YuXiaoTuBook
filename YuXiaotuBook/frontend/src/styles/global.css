@@ -55,3 +55,18 @@ a {
   font-weight: 600;
   margin-bottom: 24px;
 }
+
+/* 全站 video：禁用浏览器注入的下载/投屏能力 */
+video {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+video::-webkit-media-controls-enclosure {
+  overflow: hidden;
+}
+
+video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls-start-playback-button {
+  display: none;
+}

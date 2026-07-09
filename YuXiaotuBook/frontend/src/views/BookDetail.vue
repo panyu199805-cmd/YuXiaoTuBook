@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import BookCard from '@/components/BookCard.vue'
+import EbookReader from '@/components/EbookReader.vue'
 import { request } from '@/api/client'
 import { useUserStore } from '@/stores/user'
 import { inlineCoverFallback, placeholderCover, resolveMediaUrl } from '@/utils/media'
@@ -184,6 +185,14 @@ watch(
       <p class="meta">{{ book.author }} · {{ book.category?.name }}</p>
       <p v-if="book.highlight" class="highlight">「{{ book.highlight }}」</p>
       <p class="summary">{{ book.summary }}</p>
+
+      <EbookReader
+        v-if="book.ebook_content"
+        :title="book.ebook_title || `${book.title} · 电子书解读`"
+        :summary="book.highlight"
+        :content="book.ebook_content"
+      />
+
       <p v-if="book.target_audience" class="audience">适合：{{ book.target_audience }}</p>
       <p class="price">¥{{ book.price?.toFixed(2) }} · 库存 {{ book.stock }}</p>
 

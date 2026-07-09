@@ -12,3 +12,6 @@ target/
 .DS_Store
 deploy/.env
 deploy/release-dist.zip
+**/deploy/release/*.tar.gz
+**/deploy/release/*.zip
+**/deploy/release/MANIFEST-*.txt

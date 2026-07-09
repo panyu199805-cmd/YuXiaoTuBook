@@ -2,8 +2,6 @@ import { defineStore } from 'pinia'
 import { request } from '@/api/client'
 import { resolveMediaUrl } from '@/utils/media'
 
-const preloadVideos: HTMLVideoElement[] = []
-
 function isVideoUrl(url?: string | null) {
   return Boolean(url && /\.(mp4|webm)(\?.*)?$/i.test(url))
 }
@@ -38,7 +36,6 @@ export const useSiteStore = defineStore('site', {
         const res = await request<Record<string, unknown>>({ url: '/site/config' })
         if (res.code === 200 && res.data) {
           this.config = res.data
-          this.preloadBackground()
         }
         this.loaded = true
         return this.config
@@ -48,28 +45,6 @@ export const useSiteStore = defineStore('site', {
       } finally {
         this.loading = false
       }
-    },
-    preloadBackground() {
-      const urls = this.bgVideos
-      if (!urls.length) return
-
-      urls.forEach((url, index) => {
-        let video = preloadVideos[index]
-        if (!video) {
-          video = document.createElement('video')
-          video.preload = 'auto'
-          video.muted = true
-          video.playsInline = true
-          video.setAttribute('webkit-playsinline', 'true')
-          preloadVideos[index] = video
-        }
-        const absolute = new URL(url, window.location.origin).href
-        if (video.src !== absolute) {
-          video.src = url
-          video.load()
-        }
-        if (index === 0) void video.play().catch(() => {})
-      })
     },
   },
 })
